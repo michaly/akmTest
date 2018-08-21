@@ -3,22 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 %matplotlib osx
 
-
-
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix
-
-from sklearn.model_selection import cross_val_score
-from sklearn.linear_model import LogisticRegression
-
-# %reset # clear all variables
-
-np.random.seed(2) # For the purpose of reproducing the results detailed in the report
 # Printing config:
 pd.options.display.float_format = '{:,.4f}'.format
 pd.set_option('display.expand_frame_repr', False) # for printing full objects
 
-def colNameListByDType(df, numericCols = True):
+def colNameListByDType(df, numericCols=True):
     # # # # # # # # # #
     # Finds the names of numeric/non-numeric columns of a dataframe
     # Args:
@@ -69,18 +58,18 @@ def dataAnalysis(data_df, labelColName):
 
     # Basic statistics:
     print("% of target (label) = 1: " + str(100 * np.sum(data_df[labelColName]) / data_df.shape[0]))
-    print(data_df.describe(include = [np.number]))  # Print summary of numeric features
-    print(data_df.describe(include = ['O']))  # Print summary of non-numeric features
+    print(data_df.describe(include=[np.number]))  # Print summary of numeric features
+    print(data_df.describe(include=['O']))  # Print summary of non-numeric features
 
-    non_numeric_cols = colNameListByDType(data_df, numericCols = False)
+    non_numeric_cols = colNameListByDType(data_df, numericCols=False)
 
     for col in non_numeric_cols:
         print('\nUnique value counts of column : ' + col)
-        print(data_df[col].value_counts(normalize = True))
+        print(data_df[col].value_counts(normalize=True))
 
     # Check if the numeric columns in the dataset are coming from normal dist
     # (will help us decide how to scale the features later on):
-    numeric_cols = colNameListByDType(data_df, numericCols = True)
+    numeric_cols = colNameListByDType(data_df, numericCols=True)
     alpha = 1e-3
     for i in numeric_cols:
         k2, p = normaltest(data_df[i])  # null hypothesis: the feature comes from a normal distribution
@@ -96,6 +85,27 @@ def dataAnalysis(data_df, labelColName):
     """ It seems like 'total_ime' has the greatest separation with respect to 'target'. """
 
     return True
+
+def colNamesToFilter(df, method, min_val):
+    # # # # # # # # # #
+    # Finds out which columns should be filtered (according to the specified method and min_val).
+    # Args:
+    #       df - (pandas dataframe), the dataset
+    #       method - (string), possible values: 'freq' - frequency
+    #                                           'std' - standard deviation
+    #       min_val - (float), columns with method value lower or equal to this argument will be filtered
+    # Return:
+    #       f_cols - (list of strings), list of column names to filter
+    # # # # # # # # # #
+    f_cols = []
+    if(method == 'freq'):
+        cols_method = df.astype(bool).sum(axis=0)
+    elif(method == 'std'):
+        cols_method = df.std(axis=0)
+    else:
+        print("colNamesToFilter warning: method is empty, no filter will be applied.")
+    f_cols += list(cols_method[cols_method <= min_val].index)
+    return f_cols
 
 def extractFeaturesFromPath(path_sr):
     # # # # # # # # # #
@@ -113,24 +123,15 @@ def extractFeaturesFromPath(path_sr):
     path_sr[path_sr.str.endswith(delimiter)] = path_sr[path_sr.str.endswith(delimiter)].apply(lambda x: x + "empty_end") # Add 'empty_end' string to paths that end with "/", may be represent a directory.
 
     path_sr = path_sr.apply(lambda x: list(set(x.split(delimiter)))) # Split the path by "/"
-    """kw_set = set()
-    for i in path_sr:
-        #print(i)
-        kw_set = set(list(kw_set) + list(i))
-        #print("kw_set: " + str(kw_set))"""
-
-    url_df = pd.DataFrame({'idx' : path_sr.index, 'path' : path_sr})
+    path_df = pd.DataFrame({'idx' : path_sr.index, 'path' : path_sr})
 
     dummies_df = pd.get_dummies(
-        url_df.join(pd.Series(url_df['path'].apply(pd.Series).stack().reset_index(1, drop = True),
-                          name = 'splitedPath')).drop('path', axis = 1).rename(columns = {'splitedPath': 'path'}),
-        columns = ['path']).groupby('idx', as_index = False).sum().drop(columns = ['idx'])
-
-    # Drop the features containing less than 10 occurrences:
-    #count_col_values = dummies_df.astype(bool).sum(axis = 0)
-    #remove_cols = list(count_col_values[count_col_values <= 10].index)
-    #dummies_df.drop(columns = remove_cols, inplace = True)
-
+        path_df.join(pd.Series(path_df['path'].apply(pd.Series).stack().reset_index(1, drop=True),
+                          name='splittedPath')).drop('path', axis=1).rename(columns={'splittedPath': 'path'}),
+        columns=['path']).groupby('idx', as_index=False).sum().drop(columns=['idx'])
+    remove_cols = colNamesToFilter(dummies_df, method='freq', min_val=10.)
+    dummies_df.drop(columns=remove_cols, inplace=True)
+    print("Adding %d features extracted from 'path'." % dummies_df.shape[1])
     return dummies_df
 
 def featureDistPlot(df):
@@ -143,9 +144,9 @@ def featureDistPlot(df):
     # # # # # # # # # #
     import seaborn as sns
 
-    f, axes = plt.subplots(1, df.shape[1], figsize = (20, 3), sharex = True)
+    f, axes = plt.subplots(1, df.shape[1], figsize=(20, 3), sharex=True)
     for i in range(0, df.shape[1]):
-        sns.distplot(df[df.columns[i]], ax = axes[i])
+        sns.distplot(df[df.columns[i]], ax=axes[i])
     return True
 
 def featureScaling(data_df, fe_to_scale_list):
@@ -160,7 +161,7 @@ def featureScaling(data_df, fe_to_scale_list):
     # # # # # # # # # #
     from sklearn.preprocessing import MinMaxScaler
     # fe_to_scale_list = colNameListByDType(data_df.drop(columns=['target','port']), numericCols = True)
-    s_data_df = data_df.copy(deep = True)
+    s_data_df = data_df.copy(deep=True)
 
     # Plot the feature distribution to analyse if log-transform is required:
     min_max_scaler = MinMaxScaler()
@@ -169,19 +170,11 @@ def featureScaling(data_df, fe_to_scale_list):
     featureDistPlot(s_data_df[fe_to_scale_list])
     """Log-transform won't help us in this case to approximate to normal distribution."""
 
-    # Perform log-transform to approximate to normal dist
-    # Scale to positive feature (min value = 1), if not already:
-    # for i in fe_to_scale_list:
-    #    min_val = s_data_df[i].min()
-    #    if(min_val <= 0.):
-    #        s_data_df[i] = s_data_df[i].apply(lambda x: x + (1 - min_val))
-    # s_data_df[fe_to_scale_list] = s_data_df[fe_to_scale_list].transform(np.log)
-
     return s_data_df
 
 def preprocData(data_df, labelColName):
     # # # # # # # # # #
-    # Preprocess dataset - feature extraction and feature reduction
+    # Preprocess dataset - feature extraction, feature reduction and feature scaling
     # Note: we didn't clean outliers because the numerical features were not normally distributed, even after log transformation.
     #       Also, no missing data handling is done, because there are no such cases in our dataset.
     # Args:
@@ -190,8 +183,6 @@ def preprocData(data_df, labelColName):
     # Return:
     #       pp_data_df - (pandas dataframe), the preprocessed dataset
     # # # # # # # # # #
-
-    #import seaborn as sns # For plotting the heatmap of correlation between the columns
     import re
 
     # data_df = data.copy(deep=True); labelColName = labelCol
@@ -207,79 +198,65 @@ def preprocData(data_df, labelColName):
     """
     # FEATURE EXTRACTION:
     # Convert categorical features to dummy features:
-    categorical_cols = list(set(['path']).symmetric_difference(colNameListByDType(data_df, numericCols = False)))
-    pp_data_df = pd.get_dummies(data = data_df, columns = categorical_cols, drop_first = True)
+    categorical_cols = list(set(['path']).symmetric_difference(colNameListByDType(data_df, numericCols=False)))
+    pp_data_df = pd.get_dummies(data=data_df, columns=categorical_cols, drop_first=True)
 
     # Extract features (keywords) from 'path':
     path_fe_df = extractFeaturesFromPath(pp_data_df['path'])
-    pp_data_df = pd.merge(pp_data_df, path_fe_df, left_index = True, right_index = True)
+    pp_data_df = pd.merge(pp_data_df, path_fe_df, left_index=True, right_index=True)
 
 
     # FEATURE REDUCTION:
+    remove_cols = []
     # Correlation analysis:
     abs_corr_df = pp_data_df.corr().abs() # (absolute value) correlation matrix
-
     # the matrix is symmetric so we need to extract upper triangle matrix without diagonal (k = 1):
     ordered_abs_corr = (abs_corr_df.where(np.triu(np.ones(abs_corr_df.shape), k = 1).astype(np.bool)).stack().sort_values(ascending = False))
 
     # Find redundant features:
     corr_threshold = 0.9
     corr_fe = ordered_abs_corr[ordered_abs_corr >= corr_threshold] # series object with 2 indices (2 features)
-    # DEBUG: print("abs(correlation) == 1 :\n%s" % corr_fe)
+    # print("DEBUG: abs(correlation) == 1 :\n%s" % corr_fe)
     corr_fe_index_1 = corr_fe.index.get_level_values(0)
     corr_fe_index_2 = corr_fe.index.get_level_values(1)
     # Define the redundant features list:
     if(any(re.search(labelColName, i) != None for i in corr_fe_index_1) == False): # If 'target' is not in corr_fe first index
-        remove_cols = list(corr_fe_index_1)
+        remove_cols += list(corr_fe_index_1)
     elif(any(re.search(labelColName, i) != None for i in corr_fe_index_2) == False):  # If 'target' is not in corr_fe second index
-        remove_cols = list(corr_fe_index_2)
+        remove_cols += list(corr_fe_index_2)
     else: # 'target' is in both indices - not supported for now.
-        print("%s is in both corr_fe indices. This scenario is not yet supported - exiting.")
-        return False
-
-    #remove_cols += ['port'] # std = 0, one value - all (-1)
-    #remove_cols += ['user_agent'] # perfect predictor
-    #remove_cols += ['latitude', 'longitude', 'timezone'] # high correlations
+        print("%s is in both corr_fe indices. This scenario is not yet supported - no high-correlation filter will be applied.")
 
     # Std filter:
-    cols_std = pp_data_df.std(axis = 0)
-    min_std = 0.01
-    remove_cols += list(cols_std[cols_std <= min_std].index)
+    remove_cols += colNamesToFilter(pp_data_df, method='std', min_val=0.01)
     # Frequency filter (most likely these features will be filtered in the previous filter):
-    count_col_values = pp_data_df.astype(bool).sum(axis = 0)
-    min_freq = 10
-    remove_cols += list(count_col_values[count_col_values <= min_freq].index)
+    remove_cols += colNamesToFilter(pp_data_df, method='freq', min_val=10.)
     remove_cols += ['path']
     remove_cols = set(remove_cols) # Remove duplicates
 
-
     print(("Delete %d out of %d columns.") % (len(remove_cols), pp_data_df.shape[1]))
-    pp_data_df.drop(columns = remove_cols, inplace = True)
+    pp_data_df.drop(columns=remove_cols, inplace=True)
     print("Preprocessed data shape after feature reduction - " + str(pp_data_df.shape))
 
-    # plot the heatmap after feature reduction:
-    corr_df = pp_data_df.drop(columns = [labelColName]).corr()
-    #sns.heatmap(corr_df, xticklabels = corr_df.columns, yticklabels = corr_df.columns)
-
     # Multicollinearity filter (detected by existence of tiny eigenvalues of the correlation matrix)
+    """ 
+        Existence of tiny eigenvalues (very close to zero) implies multicollinearity. 
+        The corresponding eigenvectors can detail the dependency of the features.
+        """
+    corr_df = pp_data_df.drop(columns=[labelColName]).corr()
     remove_cols = []
     eigval, eigvec = np.linalg.eig(corr_df)
     min_eigval = 0.001
     small_eigval_idx = np.where(eigval <= min_eigval)[0]
     for i in small_eigval_idx:
         #print("DEBUG: Eigenvector of eigenvalue %.15f :\n%s\n" % (eigval[i], eigvec[:, i]))
-        remove_cols += list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.1)[0]][:-1]) # Keep only one of the features and remove the rest
+        remove_cols += list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.01)[0]][:-1]) # Keep only one of the features and remove the rest
         print("DEBUG: multicollinearity (major) relation: %s" % list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.1)[0]]))
-    """ There are still 2 very close eigenvalues to zero. The corresponding eigenvectors can detail the dependency.
-     Also, we still observe high correlation (corr_df), so it is not surprising. However these correlations seems like 
-     good predictors and in contrary to 'user_agent' (perfect predictor), for example, which is most likely due to 
-     data collection bias. 
-     We better use additional feature reduction before applying sensitive models. """
 
     remove_cols = set(remove_cols) # Remove duplicates
     print(("Multicollinearity filter: delete %d out of %d columns.") % (len(remove_cols), pp_data_df.shape[1]))
     print("DEBUG: remove_cols = %s" % remove_cols)
-    pp_data_df.drop(columns = remove_cols, inplace = True)
+    pp_data_df.drop(columns=remove_cols, inplace=True)
     print("Preprocessed data shape after feature reduction - " + str(pp_data_df.shape))
 
     # FEATURE SCALING:
@@ -288,71 +265,63 @@ def preprocData(data_df, labelColName):
 
     return pp_data_df
 
-def splitTrainTest(data_df, labelColName):
 
-    y = data_df[labelColName]
-    X = data_df.drop(columns = [labelColName])#, inplace = True)
-    print("dims : data_df - %s ; X - %s" % (data_df.shape, X.shape))
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.4, random_state = 2)
-    print("Dimentions: \nX_train - %s ; X_test - %s\ny_train - %s    ; y_test - %s" % (X_train.shape, X_test.shape, y_train.shape, y_test.shape))
-    print("Target = 1 (freq):    train - %d  ; test - %d\nTarget = 1 (percent): train - %.3f ; test - %.3f"
-          % (np.sum(y_train), np.sum(y_test), 100 * np.sum(y_train) / len(y_train), 100 * np.sum(y_test) / len(y_test)))
-
-    return (X_train, X_test, y_train, y_test)
-
-def trainClassifiers(X_train, y_train):
-
-    # Decision Tree:
+def defineClassifiers():
+    # # # # # # # # # #
+    # Define classifiers - Decision Tree, Random Forest, SVM
+    # Args:
+    #       Nothing
+    # Return:
+    #       clf_list - (list of sklearn classifier objects BEFORE FITTING)
+    # # # # # # # # # #
     from sklearn import tree
-    import graphviz
-    dt_clf = tree.DecisionTreeClassifier()
-    dt_clf = dt_clf.fit(X_train, y_train)
-    dot_data = tree.export_graphviz(dt_clf, out_file = None, feature_names = X_train.columns,
-                         #class_names=iris.target_names,
-                         filled = True, rounded = True,
-                         special_characters = True)
-    graph = graphviz.Source(dot_data)
-    graph.render("decision_tree_graph")
-
-    # Random Forest:
     from sklearn.ensemble import RandomForestClassifier
-    rf_clf = RandomForestClassifier(max_depth = 1, random_state = 0)
-    print("Random Forest features importance: \n%s" % rf_clf.feature_importances_)
+    from sklearn.svm import SVC
 
-    # Naive Bayes:
-    from sklearn.naive_bayes import GaussianNB
-    gnb_clf = GaussianNB()
+    dt = tree.DecisionTreeClassifier(max_depth=1)  # , min_samples_leaf=100)
+    rf = RandomForestClassifier(max_depth=2, random_state=0)  # , min_samples_leaf=100))
+    svm = SVC(kernel='linear')
 
-    clf_list = [rf_clf, gnb_clf]
+    clf_list = [dt, rf, svm]
+
+    return clf_list
+
+def evaluateClassifiers(X, y, clf_list):
+    # # # # # # # # # #
+    # Evaluate classifiers that were NOT FITTED - precision, recall, f1
+    # Args:
+    #       X - (pandas dataframe), the design matrix (without train/test split)
+    #       y - (pandas series), the labels (without train/test split)
+    #       clf_list - (list of sklearn classifier objects BEFORE FITTING)
+    # Return:
+    #       best_clf - (sklearn classifier object) best classifier - the one with max(E[F1_scores])
+    # # # # # # # # # #
+    from sklearn.model_selection import cross_validate, ShuffleSplit
+
+    cv = ShuffleSplit(n_splits=5, test_size=0.4, random_state=0)
+    scoring = ('precision', 'recall', 'f1')
+    f1_scores = []
     for clf in clf_list:
-        clf.fit(X_train, y_train)
-
-    return
-
-def evaluateClassifiers(X_test, y_test, clf):
-    from sklearn.metrics import confusion_matrix
-
-    print("Evaluate classifier: %s" % type(clf))
-    y_pred = clf.predict(X_test)
-    print(confusion_matrix(y_test, y_pred))
-
-    return True
+        print("\nEvaluate classifier: %s" % type(clf))
+        # for regular K-fold use c=k:
+        scores = cross_validate(clf, X, y, cv=cv, scoring=scoring)
+        f1_scores.append(scores["test_f1"].mean())
+        for s in scoring:
+            print("(class 1) %s: %f" % (s, scores["test_" + s].mean()))
+    f1_scores = np.array(f1_scores)
+    best_clf = clf_list[np.where(f1_scores == max(f1_scores))[0][0]]
+    return best_clf
 
 data = pd.read_csv("./data.csv")
 
-labelCol = 'target'
+label_col = 'target'
 
-dataAnalysis(data, labelCol)
-ppData = preprocData(data, labelCol)
-(X_train, X_test, y_train, y_test) = splitTrainTest(ppData, labelCol)
+dataAnalysis(data, label_col)
+ppData = preprocData(data, label_col)
+clf_list = defineClassifiers()
+X = ppData.drop(columns=label_col)
+y = ppData[label_col]
+clf = evaluateClassifiers(X, y, clf_list)
 
-
-
-
-
-model = LogisticRegression()
-results = cross_val_score(model, X_train, y_train)#, cv=kfold)
-print("Accuracy: %.3f%% (%.3f%%)") % (results.mean()*100.0, results.std()*100.0)
-
+print("We recommend using %s classifier for detecting %s" % (clf, label_col))
 
