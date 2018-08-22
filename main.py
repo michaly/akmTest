@@ -35,7 +35,7 @@ def colNameListByDType(df, numericCols=True):
 
     return col_name_list
 
-def dataAnalysis(data_df, labelColName):
+def dataAnalysis(data_df, labelColName, plotSctrMat=False):
     # # # # # # # # # #
     # Analyse the dataset
     # Args:
@@ -78,11 +78,12 @@ def dataAnalysis(data_df, labelColName):
         else:  # The null hypothesis cannot be rejected
             print("We cannot reject the hypothesis that %s is coming from a normal distribution, pval = %.4f" % (i, p))
 
-    # Scatter plot of numeric features:
-    numeric_cols = list(set(['port']).symmetric_difference(numeric_cols)) # 'port' has zero variance, ignore it in scatter plot
-    sample_idx = random.sample(range(0, data_df.shape[0] - 1), 500)
-    scatter_matrix(data_df.loc[sample_idx, numeric_cols])
-    """ It seems like 'total_ime' has the greatest separation with respect to 'target'. """
+    if(plotSctrMat):
+        # Scatter plot of numeric features:
+        numeric_cols = list(set(['port']).symmetric_difference(numeric_cols)) # 'port' has zero variance, ignore it in scatter plot
+        sample_idx = random.sample(range(0, data_df.shape[0] - 1), 500)
+        scatter_matrix(data_df.loc[sample_idx, numeric_cols])
+        """ It seems like 'total_ime' has the greatest separation with respect to 'target'. """
 
     return True
 
@@ -113,26 +114,26 @@ def extractFeaturesFromPath(path_sr):
     # Args:
     #       path_sr - (pandas series), the 'path' column (a column of strings with '/' delimiter)
     # Return:
-    #       dummies_df - (pandas dataframe), the new extracted features (original indices for future merge)
+    #       w_freq_df - (pandas dataframe), the new extracted features - word frequencies (original indices for future merge)
     # # # # # # # # # #
+    from sklearn.feature_extraction.text import CountVectorizer
 
     # path_sr = data['path'].copy(deep=True)
     delimiter = "/"
-    if(all(path_sr.str.startswith(delimiter))): # If all path values start with "/" - remove it. Otherwise, it may mean something, so don't.
-        path_sr = path_sr.str[1:]
-    path_sr[path_sr.str.endswith(delimiter)] = path_sr[path_sr.str.endswith(delimiter)].apply(lambda x: x + "empty_end") # Add 'empty_end' string to paths that end with "/", may be represent a directory.
-
-    path_sr = path_sr.apply(lambda x: list(set(x.split(delimiter)))) # Split the path by "/"
-    path_df = pd.DataFrame({'idx' : path_sr.index, 'path' : path_sr})
-
-    dummies_df = pd.get_dummies(
-        path_df.join(pd.Series(path_df['path'].apply(pd.Series).stack().reset_index(1, drop=True),
-                          name='splittedPath')).drop('path', axis=1).rename(columns={'splittedPath': 'path'}),
-        columns=['path']).groupby('idx', as_index=False).sum().drop(columns=['idx'])
-    remove_cols = colNamesToFilter(dummies_df, method='freq', min_val=10.)
-    dummies_df.drop(columns=remove_cols, inplace=True)
-    print("Adding %d features extracted from 'path'." % dummies_df.shape[1])
-    return dummies_df
+    # Add 'empty_end' string to paths that end with "/", most likely represent a directory:
+    end_dlt_idx = path_sr.str.endswith(delimiter)
+    path_sr[end_dlt_idx] = path_sr[end_dlt_idx].apply(lambda x: x + "empty_end")
+    path_sr = path_sr.apply(lambda x: x.replace(delimiter, " "))
+    cv = CountVectorizer()
+    cv.fit(path_sr)
+    print("DEBUG: number of words: %d" % len(cv.vocabulary_))
+    w_freq_csr = cv.transform(path_sr)
+    cols_name = ["path_" + i for i in cv.get_feature_names()]
+    w_freq_df = pd.DataFrame(w_freq_csr.todense(), columns=cols_name)
+    remove_cols = colNamesToFilter(w_freq_df, method='freq', min_val=10)
+    w_freq_df.drop(columns=remove_cols, inplace=True) # dropping rare features (less than 10 occurrences)
+    print("Adding %d features extracted from 'path'." % w_freq_df.shape[1])
+    return w_freq_df
 
 def featureDistPlot(df):
     # # # # # # # # # #
@@ -149,7 +150,7 @@ def featureDistPlot(df):
         sns.distplot(df[df.columns[i]], ax=axes[i])
     return True
 
-def featureScaling(data_df, fe_to_scale_list):
+def featureScaling(data_df, fe_to_scale_list, plotDist=False):
     # # # # # # # # # #
     # Scale (MinMax) the specified columns of a dataset [0,1]
     # Note: we don't perform standardization because the continues features are not normally distributed.
@@ -166,13 +167,14 @@ def featureScaling(data_df, fe_to_scale_list):
     # Plot the feature distribution to analyse if log-transform is required:
     min_max_scaler = MinMaxScaler()
     s_data_df[fe_to_scale_list] = min_max_scaler.fit_transform(s_data_df[fe_to_scale_list])
-    # Plot the features (fe_to_scale_list) dist:
-    featureDistPlot(s_data_df[fe_to_scale_list])
-    """Log-transform won't help us in this case to approximate to normal distribution."""
+    if(plotDist):
+        # Plot the features (fe_to_scale_list) dist:
+        featureDistPlot(s_data_df[fe_to_scale_list])
+        """Log-transform won't help us in this case to approximate to normal distribution."""
 
     return s_data_df
 
-def preprocData(data_df, labelColName):
+def preprocData(data_df, labelColName, plotFeDist=False):
     # # # # # # # # # #
     # Preprocess dataset - feature extraction, feature reduction and feature scaling
     # Note: we didn't clean outliers because the numerical features were not normally distributed, even after log transformation.
@@ -227,21 +229,20 @@ def preprocData(data_df, labelColName):
     else: # 'target' is in both indices - not supported for now.
         print("%s is in both corr_fe indices. This scenario is not yet supported - no high-correlation filter will be applied.")
 
-    # Std filter:
-    remove_cols += colNamesToFilter(pp_data_df, method='std', min_val=0.01)
-    # Frequency filter (most likely these features will be filtered in the previous filter):
+    # Zero std filter:
+    remove_cols += colNamesToFilter(pp_data_df, method='std', min_val=0.)
+    # Frequency filter:
     remove_cols += colNamesToFilter(pp_data_df, method='freq', min_val=10.)
     remove_cols += ['path']
     remove_cols = set(remove_cols) # Remove duplicates
 
-    print(("Delete %d out of %d columns.") % (len(remove_cols), pp_data_df.shape[1]))
+    print(("High correlation + std + freq filters: delete %d out of %d columns.") % (len(remove_cols), pp_data_df.shape[1]))
     pp_data_df.drop(columns=remove_cols, inplace=True)
-    print("Preprocessed data shape after feature reduction - " + str(pp_data_df.shape))
 
     # Multicollinearity filter (detected by existence of tiny eigenvalues of the correlation matrix)
     """ 
-        Existence of tiny eigenvalues (very close to zero) implies multicollinearity. 
-        The corresponding eigenvectors can detail the dependency of the features.
+        Existence of tiny eigenvalues (very close to zero) and high sqrt(max_eigval/min_eigval) of the correlation matrix 
+        implies multicollinearity existence. The corresponding eigenvectors can detail the dependency of the features.
         """
     corr_df = pp_data_df.drop(columns=[labelColName]).corr()
     remove_cols = []
@@ -250,21 +251,21 @@ def preprocData(data_df, labelColName):
     small_eigval_idx = np.where(eigval <= min_eigval)[0]
     for i in small_eigval_idx:
         #print("DEBUG: Eigenvector of eigenvalue %.15f :\n%s\n" % (eigval[i], eigvec[:, i]))
-        remove_cols += list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.01)[0]][:-1]) # Keep only one of the features and remove the rest
-        print("DEBUG: multicollinearity (major) relation: %s" % list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.1)[0]]))
+        # Keep only one of the major features and remove the rest
+        remove_cols += list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.01)[0]][:-1])
+        #print("DEBUG: multicollinearity (major) relation: %s" % list(corr_df.columns[np.where(np.abs(eigvec[:, i]) >= 0.1)[0]]))
 
     remove_cols = set(remove_cols) # Remove duplicates
     print(("Multicollinearity filter: delete %d out of %d columns.") % (len(remove_cols), pp_data_df.shape[1]))
-    print("DEBUG: remove_cols = %s" % remove_cols)
+    #print("DEBUG: remove_cols = %s" % remove_cols)
     pp_data_df.drop(columns=remove_cols, inplace=True)
     print("Preprocessed data shape after feature reduction - " + str(pp_data_df.shape))
 
     # FEATURE SCALING:
     fe_to_scale_list = pp_data_df.columns[np.array(pp_data_df.apply(lambda x: x.min() < 0)) | np.array(pp_data_df.apply(lambda x: x.max() > 1))]
-    pp_data_df = featureScaling(pp_data_df, fe_to_scale_list)
+    pp_data_df = featureScaling(pp_data_df, fe_to_scale_list, plotDist=plotFeDist)
 
     return pp_data_df
-
 
 def defineClassifiers():
     # # # # # # # # # #
@@ -312,16 +313,53 @@ def evaluateClassifiers(X, y, clf_list):
     best_clf = clf_list[np.where(f1_scores == max(f1_scores))[0][0]]
     return best_clf
 
+def plotTopFeatures(coef_nparr, fe_name_list, top_features=20):
+    # # # # # # # # # #
+    # Plots the k min and max coefficients
+    # Args:
+    #       coef_nparr - (numpy ndarray), the model's coefficients
+    #       fe_name_list - (list of strings), the features names
+    #       top_features - (int), k
+    # Return:
+    #       Nothing
+    # # # # # # # # # #
+    top_positive_coefficients = np.argsort(coef_nparr)[-top_features:]
+    top_negative_coefficients = np.argsort(coef_nparr)[:top_features]
+    top_coefficients = np.hstack([top_negative_coefficients, top_positive_coefficients])
+    # Create plot
+    plt.figure(figsize=(15, 5))
+    colors = ['red' if c < 0 else 'blue' for c in coef_nparr[top_coefficients]]
+    plt.bar(np.arange(2 * top_features), coef_nparr[top_coefficients], color=colors)
+    feature_names = np.array(fe_name_list)
+    plt.xticks(np.arange(0,  2 * top_features), feature_names[top_coefficients], rotation=60, ha='right')
+    #plt.show()
+    return
+
 data = pd.read_csv("./data.csv")
 
 label_col = 'target'
+actPlotsFlag = False
 
-dataAnalysis(data, label_col)
-ppData = preprocData(data, label_col)
+dataAnalysis(data, label_col, plotSctrMat=actPlotsFlag)
+ppData = preprocData(data, label_col, plotFeDist=actPlotsFlag)
 clf_list = defineClassifiers()
 X = ppData.drop(columns=label_col)
 y = ppData[label_col]
 clf = evaluateClassifiers(X, y, clf_list)
+print("We recommend using the following classifier for predicting %s:\n%s" % (label_col, clf))
 
-print("We recommend using %s classifier for detecting %s" % (clf, label_col))
+# Plot the most important features:
+clf.fit(X, y) # train the classifier on the entire dataset
+if(str(type(clf)) == "<class 'sklearn.svm.classes.SVC'>"): # SVM
+    coefs = clf.coef_.ravel()
+elif(str(type(clf)) in ["<class 'sklearn.ensemble.forest.RandomForestClassifier'>", # Decision Tree / Random Forest
+                        "<class 'sklearn.tree.tree.DecisionTreeClassifier'>"]):
+    coefs = clf.feature_importances_.ravel()
+else:
+    coefs = []
+    print("Unrecognized model, we cannot plot the model's most important features.")
+plotTopFeatures(coefs, X.columns, top_features=6)
+
+
+
 
