@@ -14,5 +14,5 @@ Required packages:
 ** All packages exists under Anaconda3
 
 Required files under the project directory:
-	- data.csv: the provided data file 
-	- main.py: the script  
+	- data.csv: the provided data file. The data file path/name can be configured in akm_q2.ipynb (dataFilePath). 
+	- akm_q2.ipynb: the Jupyter notebook.  
